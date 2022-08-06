@@ -268,7 +268,7 @@
             this.ForeColor = System.Drawing.SystemColors.ButtonShadow;
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedToolWindow;
             this.Name = "MaterialDownloaderForm";
-            this.Text = "AmbientCG Texture Downloader";
+            this.Text = "AmbientCG Material Downloader";
             this.Load += new System.EventHandler(this.TextureDownloaderForm_Load);
             this.ResumeLayout(false);
             this.PerformLayout();

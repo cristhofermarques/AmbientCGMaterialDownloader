@@ -149,7 +149,7 @@ namespace AmbientCGMaterialDownloader
             Dictionary<string, int> categories = GetCategories();
             string[] sizes = GetSizes();
             string[] formats = GetFormats();
-            char[] postfixes = new char[] { ' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z' };
+            char[] postfixes = new char[] { ' ', 'A', 'B', 'C' };
 
             downloadPgb.Maximum = categories.Count;
             downloadPgb.Value = 0;
@@ -181,6 +181,13 @@ namespace AmbientCGMaterialDownloader
                                 string snakeCaseMatName = string.Format("{0}_{1}", snakeCaseCategory, snakeCaseId);
 
                                 string zipMatFilePath = Path.Combine(outPathFbd.SelectedPath, string.Format("{0}_{1}_{2}.zip", snakeCaseMatName, snakeCaseSize, snakeCaseFormat));
+                                string unzipMatFilePath = Path.Combine(outPathFbd.SelectedPath, string.Format("{0}_{1}_{2}", snakeCaseMatName, snakeCaseSize, snakeCaseFormat));
+
+                                if (Directory.Exists(unzipMatFilePath)) 
+                                {
+                                    downloadInfoLbl.Text = "Skip " + snakeCaseMatName;
+                                    continue; 
+                                }
 
                                 { 
                                     string matViewLink = string.Format("{0}{1}", ambientCgViewLink, viewMatName);
@@ -195,7 +202,6 @@ namespace AmbientCGMaterialDownloader
 
                                 if (!unzipCbx.Checked) { continue; }
                                 
-                                string unzipMatFilePath = Path.Combine(outPathFbd.SelectedPath, string.Format("{0}_{1}_{2}", snakeCaseMatName, snakeCaseSize, snakeCaseFormat));
 
                                 if(UnzipMaterial(zipMatFilePath, unzipMatFilePath))
                                 {

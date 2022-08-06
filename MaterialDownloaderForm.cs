@@ -7,12 +7,13 @@ namespace AmbientCGMaterialDownloader
 {
     public partial class MaterialDownloaderForm : Form
     {
-        HttpClient client = new HttpClient();
         private const string ambientCgViewLink = "https://ambientcg.com/view?id=";
         private const string ambientCgDownloadLink = "https://ambientcg.com/get?file=";
 
         Dictionary<string, int> _categories = new Dictionary<string, int>(100);
 
+        bool _isDownloading = false;
+        MaterialDownloader[] _downloaders = new MaterialDownloader[1];
 
         // Constructors
         public MaterialDownloaderForm()
@@ -25,6 +26,11 @@ namespace AmbientCGMaterialDownloader
         private void TextureDownloaderForm_Load(object sender, EventArgs e)
         {
             GetAmbientGCMaterialCategories();
+        }
+
+        private void MaterialDownloaderForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            CancelDownload();
         }
 
         private void unzipCbx_CheckedChanged(object sender, EventArgs e)
@@ -45,32 +51,40 @@ namespace AmbientCGMaterialDownloader
 
         private void downloadBtn_Click(object sender, EventArgs e)
         {
-            if(! (outPathFbd.ShowDialog() == DialogResult.OK) && Directory.Exists(outPathFbd.SelectedPath)) { return; }
-
-            downloadPgb.Visible = true;
-            downloadPgb.Enabled = true;
-            catDownloadPgb.Enabled = true;
-            catDownloadPgb.Visible = true;
-            downloadInfoLbl.Visible = true;
-
-            DowloadMaterials();
-
-            downloadInfoLbl.Visible = false;
-            downloadInfoLbl.Text = "";
-            downloadPgb.Visible = false;
-            downloadPgb.Enabled = false;
-            downloadPgb.Value = 0;
-            catDownloadPgb.Enabled = false;
-            catDownloadPgb.Visible = false;
-            catDownloadPgb.Value = 0;
+            if (_isDownloading)
+            {
+                CancelDownload();
+                return; 
+            }
+            else
+            {
+                if(! (outPathFbd.ShowDialog() == DialogResult.OK) && Directory.Exists(outPathFbd.SelectedPath)) { return; }
+                SetToDownloadMode();
+                DowloadMaterials();
+            }
         }
 
+        private void downloadTimer_Tick(object sender, EventArgs e)
+        {
+            if (!_isDownloading) { return; }
+
+            UpdateDownloadProgress();
+        }
+
+        private void allCbx_CheckedChanged(object sender, EventArgs e)
+        {
+            for(int itemIdx = 0; itemIdx < categoryCbxList.Items.Count; itemIdx++)
+            {
+                categoryCbxList.SetItemChecked(itemIdx, allCbx.Checked);
+            }
+        }
 
         // Material Downloader Functions
 
         private async void GetAmbientGCMaterialCategories()
         {
-            string[] ignoreCategories = new string[] { "Substance", "HDRI" };
+            HttpClient client = new HttpClient();
+            string[] ignoreCategories = new string[] { "Substance", "Sbustance", "HDRI" };
 
             string rawHtml = await client.GetStringAsync("https://ambientcg.com/categories");
 
@@ -95,7 +109,7 @@ namespace AmbientCGMaterialDownloader
                     if (!int.TryParse(catPairStr[1], out catMatAmount)) { return; }
 
                     // Success to get category name and the ammount
-                    categoryCbxList.Items.Add(catPairStr[0], true);
+                    categoryCbxList.Items.Add(catPairStr[0], allCbx.Checked);
                     _categories.Add(catPairStr[0], catMatAmount);
                 }
             }
@@ -143,198 +157,152 @@ namespace AmbientCGMaterialDownloader
             return formats.ToArray();
         }
 
+        private Dictionary<string, int>[] DistributeCategories(Dictionary<string, int> categories, int targetDownloadersCount)
+        {
+            if(categories.Count == 1) { return new Dictionary<string, int>[1] { categories }; }
+
+            bool targetIsMajor = false;
+            if(targetDownloadersCount >= categories.Count) { targetDownloadersCount = categories.Count; targetIsMajor = true; }
+
+            int totalMaterialCount = 0;
+            foreach (KeyValuePair<string, int> category in categories) { totalMaterialCount += category.Value; }
+
+
+            int targetPerDownloaderMaterialCount = totalMaterialCount / targetDownloadersCount;
+
+
+            // To get the real downloader count
+            int totalDistributedMaterialCount = 0;
+
+            int currDownloaderMaterialIndex = 0;
+            int currDownloaderMaterialCount = 0;
+
+            foreach (KeyValuePair<string, int> category in categories) 
+            {
+                if(totalDistributedMaterialCount >= totalMaterialCount) { break; }
+
+                currDownloaderMaterialCount += category.Value;
+                totalDistributedMaterialCount += category.Value;
+
+                if(currDownloaderMaterialCount >= targetPerDownloaderMaterialCount)
+                {
+                    currDownloaderMaterialIndex++;
+                    currDownloaderMaterialCount = 0;
+                }
+            }
+
+
+            // To create the distributed array
+            int downloadersCount = targetIsMajor ? currDownloaderMaterialIndex : currDownloaderMaterialIndex + 1;  
+
+            Dictionary<string, int>[] distributedCategories = new Dictionary<string, int>[downloadersCount];
+
+            for(int distCatIdx = 0; distCatIdx < downloadersCount; distCatIdx++)
+            {
+                distributedCategories[distCatIdx] = new Dictionary<string, int>(targetPerDownloaderMaterialCount);
+            }
+
+            totalDistributedMaterialCount = 0;
+            currDownloaderMaterialIndex = 0;
+            currDownloaderMaterialCount = 0;
+
+            foreach (KeyValuePair<string, int> category in categories)
+            {
+                if (totalDistributedMaterialCount >= totalMaterialCount) { break; }
+
+                currDownloaderMaterialCount += category.Value;
+                totalDistributedMaterialCount += category.Value;
+
+                if(!distributedCategories[currDownloaderMaterialIndex].ContainsKey(category.Key))
+                {
+                    distributedCategories[currDownloaderMaterialIndex].Add(category.Key, category.Value);
+                }
+
+                if (currDownloaderMaterialCount >= targetPerDownloaderMaterialCount)
+                {
+                    currDownloaderMaterialIndex++;
+                    currDownloaderMaterialCount = 0;
+                }
+            }
+
+            return distributedCategories;
+        }
+
+
         private void DowloadMaterials()
         {
-
-            Dictionary<string, int> categories = GetCategories();
+            Dictionary<string, int>[] distributedCategories = DistributeCategories(GetCategories(), Environment.ProcessorCount * 2);
             string[] sizes = GetSizes();
             string[] formats = GetFormats();
-            char[] postfixes = new char[] { ' ', 'A', 'B', 'C' };
+            char[] postfixes = new char[] { ' ', 'A', 'B', 'C', 'D' };
 
-            downloadPgb.Maximum = categories.Count;
+            GC.Collect();
+
+            _downloaders = new MaterialDownloader[distributedCategories.Length];
+            Console.WriteLine(_downloaders.Length);
+
+            for (int dIdx = 0; dIdx < _downloaders.Length; dIdx++)
+            {
+                _downloaders[dIdx] = new MaterialDownloader(distributedCategories[dIdx], sizes, formats, postfixes, outPathFbd.SelectedPath, unzipCbx.Checked, delPreviewImgCbx.Checked, delUsdaFileCbx.Checked, delUsdcFileCbx.Checked);
+            }
+        }
+
+        private void CancelDownload()
+        {
+            if(_isDownloading)
+            {
+                foreach(MaterialDownloader downloader in _downloaders)
+                {
+                    downloader.CancelDownload();
+                }
+
+
+                SetToIdleMode();
+            }
+        }
+
+        private void UpdateDownloadProgress()
+        {
+            int totalDownloadProgress = 0;
+
+            bool allDone = true;
+            int sumOfAllProgresses = 0;
+
+            for (int dIdx = 0; dIdx < _downloaders.Length; dIdx++)
+            {
+                int currDownloaderProgress = _downloaders[dIdx].Progress;
+
+                sumOfAllProgresses += currDownloaderProgress;
+                allDone &= currDownloaderProgress >= 100;
+            }
+
+            totalDownloadProgress = sumOfAllProgresses * 100 / (_downloaders.Length * 100);
+            downloadPgb.Value = totalDownloadProgress;
+
+            if (allDone) { SetToIdleMode(); }
+        }
+    
+        private void SetToDownloadMode()
+        { 
+            _isDownloading = true;
+
+            downloadTimer.Start();
+            downloadPgb.Visible = true;
+            downloadPgb.Enabled = true;
             downloadPgb.Value = 0;
-
-            foreach(KeyValuePair<string, int> category in categories)
-            {
-                Regex regex = new Regex("\\s+");
-                string viewCategory = regex.Replace(category.Key, "");
-                string snakeCaseCategory = category.Key.Replace(" ", "_").Trim().ToLower();
-
-                catDownloadPgb.Maximum = category.Value;
-
-                for (int id = 1; id <= category.Value; id++)
-                {
-                    foreach(char postfix in postfixes)
-                    {
-                        string viewId = postfix == ' ' ? id.ToString("000") : id.ToString("000") + postfix;
-                        string snakeCaseId = postfix == ' ' ? id.ToString("000") : id.ToString("000") + "_" + char.ToLower(postfix);
-
-                        foreach(string size in sizes)
-                        {
-                            string snakeCaseSize = size.ToLower();
-
-                            foreach (string format in formats)
-                            {
-                                string snakeCaseFormat = format.ToLower();
-
-                                string viewMatName = string.Format("{0}{1}", viewCategory, viewId);
-                                string snakeCaseMatName = string.Format("{0}_{1}", snakeCaseCategory, snakeCaseId);
-
-                                string zipMatFileName = string.Format("{0}_{1}_{2}.zip", snakeCaseMatName, snakeCaseSize, snakeCaseFormat);
-                                string unzipMatFileName = string.Format("{0}_{1}_{2}", snakeCaseMatName, snakeCaseSize, snakeCaseFormat);
-
-                                string zipMatFilePath = Path.Combine(outPathFbd.SelectedPath, zipMatFileName);
-                                string unzipMatFilePath = Path.Combine(outPathFbd.SelectedPath, unzipMatFileName);
-
-                                if (Directory.Exists(unzipMatFilePath)) 
-                                {
-                                    downloadInfoLbl.Text = "Skip " + unzipMatFileName;
-                                    continue; 
-                                }
-
-                                { 
-                                    string matViewLink = string.Format("{0}{1}", ambientCgViewLink, viewMatName);
-                                    string matDownloadLink = string.Format("{0}{1}_{2}-{3}.zip", ambientCgDownloadLink, viewMatName, size, format);
-
-                                    
-
-                                    if (!DowloadMaterial(matViewLink, matDownloadLink, zipMatFilePath)) { continue; }
-                                }
-
-                                downloadInfoLbl.Text = unzipMatFileName;
-
-                                if (!unzipCbx.Checked) { continue; }
-                                
-
-                                if(UnzipMaterial(zipMatFilePath, unzipMatFilePath))
-                                {
-                                    RenameMaterialMaps(unzipMatFilePath, snakeCaseMatName, snakeCaseSize, snakeCaseFormat);
-                                }
-                            }
-                        }
-                    }
-
-                    catDownloadPgb.Value = id;
-                }
-
-                downloadPgb.Value++;
-            }
+            downloadPgb.Maximum = 100;
+            downloadBtn.Text = "Cancel";
         }
 
-        private bool DowloadMaterial(string matViewLink, string matDownloadLink, string matFilePath)
+        private void SetToIdleMode()
         {
-            Task<HttpResponseMessage> task = client.GetAsync(matViewLink);
-            task.Wait();
+            _isDownloading = false;
 
-            HttpResponseMessage response = task.Result;
-            if (!response.IsSuccessStatusCode) { return false; }
-
-            task = client.GetAsync(matDownloadLink);
-            task.Wait();
-
-            Task<string> strTask = task.Result.Content.ReadAsStringAsync();
-            strTask.Wait();
-
-            if(strTask.Result.Length < 24) { return false; }
-
-            if (File.Exists(matFilePath)) { File.Delete(matFilePath); }
-
-            FileStream file = new FileStream(matFilePath, FileMode.OpenOrCreate, FileAccess.Write);
-            task.Result.Content.CopyToAsync(file).Wait();
-            file.Close();
-
-            return true;
-        }
-
-        private bool UnzipMaterial(string zipMatFilePath, string unzipMatDirPath)
-        {
-            if (!File.Exists(zipMatFilePath)) { return false; }
-
-            ZipFile.ExtractToDirectory(zipMatFilePath, unzipMatDirPath, true);
-            File.Delete(zipMatFilePath);
-
-            return true;
-        }
-
-        private bool RenameMaterialMaps(string matDirPath, string snakeCaseMatName, string snakeCaseMatSize, string snakeCaseMatFormat)
-        {
-            if (!Directory.Exists(matDirPath)) { return false; }
-
-            string[] mapFilePaths = Directory.GetFiles(matDirPath);
-
-            foreach(string mapFilePath in mapFilePaths)
-            {
-                if (mapFilePath.Contains("AmbientOcclusion"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "ao", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("Color"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "albedo", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("Displacement"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "height", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("Roughness"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "roughness", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("Metalness"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "metalness", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("Specular"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "specular", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("NormalDX"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "normal_dx", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if (mapFilePath.Contains("NormalGL"))
-                {
-                    string newMapName = string.Format("{0}_{1}_{2}.{3}", snakeCaseMatName, "normal_gl", snakeCaseMatSize, snakeCaseMatFormat);
-                    string newMapFilePath = Path.Combine(matDirPath, newMapName);
-
-                    File.Move(mapFilePath, newMapFilePath, true);
-                }
-                else if ( delPreviewImgCbx.Checked && mapFilePath.Contains("PREVIEW"))
-                {
-                    File.Delete(mapFilePath);
-                }
-                else if (delUsdaFileCbx.Checked && mapFilePath.Contains(".usda"))
-                {
-                    File.Delete(mapFilePath);
-                }
-                else if (delUsdcFileCbx.Checked && mapFilePath.Contains(".usdc"))
-                {
-                    File.Delete(mapFilePath);
-                }
-            }
-
-            return true;
+            downloadTimer.Stop();
+            downloadPgb.Visible = false;
+            downloadPgb.Enabled = false;
+            downloadPgb.Value = 0;
+            downloadBtn.Text = "Download";
         }
 
     }

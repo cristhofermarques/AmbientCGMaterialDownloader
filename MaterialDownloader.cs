@@ -149,6 +149,7 @@ namespace AmbientCGMaterialDownloader
             }
             catch(Exception)
             {
+                File.Create(matFilePath.Replace("zip", "txt")).Close();
                 return false;
             }
         }

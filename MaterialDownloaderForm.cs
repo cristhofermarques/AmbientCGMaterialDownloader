@@ -180,12 +180,15 @@ namespace AmbientCGMaterialDownloader
                                 string viewMatName = string.Format("{0}{1}", viewCategory, viewId);
                                 string snakeCaseMatName = string.Format("{0}_{1}", snakeCaseCategory, snakeCaseId);
 
-                                string zipMatFilePath = Path.Combine(outPathFbd.SelectedPath, string.Format("{0}_{1}_{2}.zip", snakeCaseMatName, snakeCaseSize, snakeCaseFormat));
-                                string unzipMatFilePath = Path.Combine(outPathFbd.SelectedPath, string.Format("{0}_{1}_{2}", snakeCaseMatName, snakeCaseSize, snakeCaseFormat));
+                                string zipMatFileName = string.Format("{0}_{1}_{2}.zip", snakeCaseMatName, snakeCaseSize, snakeCaseFormat);
+                                string unzipMatFileName = string.Format("{0}_{1}_{2}", snakeCaseMatName, snakeCaseSize, snakeCaseFormat);
+
+                                string zipMatFilePath = Path.Combine(outPathFbd.SelectedPath, zipMatFileName);
+                                string unzipMatFilePath = Path.Combine(outPathFbd.SelectedPath, unzipMatFileName);
 
                                 if (Directory.Exists(unzipMatFilePath)) 
                                 {
-                                    downloadInfoLbl.Text = "Skip " + snakeCaseMatName;
+                                    downloadInfoLbl.Text = "Skip " + unzipMatFileName;
                                     continue; 
                                 }
 
@@ -198,7 +201,7 @@ namespace AmbientCGMaterialDownloader
                                     if (!DowloadMaterial(matViewLink, matDownloadLink, zipMatFilePath)) { continue; }
                                 }
 
-                                downloadInfoLbl.Text = string.Format("{0}_{1}_{2}", snakeCaseMatName, snakeCaseSize, snakeCaseFormat);
+                                downloadInfoLbl.Text = unzipMatFileName;
 
                                 if (!unzipCbx.Checked) { continue; }
                                 
@@ -213,6 +216,8 @@ namespace AmbientCGMaterialDownloader
 
                     catDownloadPgb.Value = id;
                 }
+
+                downloadPgb.Value++;
             }
         }
 

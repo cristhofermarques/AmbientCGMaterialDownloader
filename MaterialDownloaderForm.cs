@@ -231,10 +231,10 @@ namespace AmbientCGMaterialDownloader
 
         private void DowloadMaterials()
         {
-            Dictionary<string, int>[] distributedCategories = DistributeCategories(GetCategories(), Environment.ProcessorCount * 2);
+            Dictionary<string, int>[] distributedCategories = DistributeCategories(GetCategories(), Environment.ProcessorCount * 4);
             string[] sizes = GetSizes();
             string[] formats = GetFormats();
-            char[] postfixes = new char[] { ' ', 'A', 'B', 'C', 'D' };
+            char[] postfixes = new char[] { ' ', 'A', 'B', 'C' };
 
             GC.Collect();
 
